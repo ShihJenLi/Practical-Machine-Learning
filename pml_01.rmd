@@ -1,0 +1,157 @@
+---
+title: "Practical Machine Learning Write_up"
+author: "sjli"
+date: "Wednesday, January 21, 2015"
+output: 
+  html_document:
+    Keep_md: true
+---
+
+
+### Objective
+In this write up, it presents to you the steps of developing a model to predict the biceps position spec (class A-E) the participants performed.  The traning data provide by Groupware@LES contains 160 variables (include ID and class) collected from six participants over 3 days in 2011.
+
+Description of classes - Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: 
+
+- Class A: exactly according to the specification, 
+- Class B: throwing the elbows to the front, 
+- Class C: lifting the dumbbell only halfway, 
+- Class D: lowering the dumbbell only halfway and 
+- Class E: throwing the hips to the front
+
+##### sources:
+More information can be found in http://groupware.les.inf.puc-rio.br/har
+
+
+
+### Analysis
+
+#### 0.Set Up R environment/Load Data
+1. set up directory
+2. Load required R packages/libraries
+3. Load training/testing data from website
+
+
+```{r data, echo=TRUE, results='hide', error=FALSE, message=FALSE, warning=FALSE}
+
+setwd("~/GitHub/Practical Machine Learning")
+
+library(graphics);library(caret);library(plyr)
+library(rpart);library(rpart.plot)
+library(randomForest);library(rattle);library(ggplot2)
+
+# Read csv data file 
+
+#in_training = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+#in_testing = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+pml_training <- read.table("pml-training.csv", head = T, sep=",", na.string=c("NA","#DIV/0!")) 
+pml_testing <- read.table("pml-testing.csv", head = T, sep=",", na.string=c("NA","#DIV/0!")) 
+
+```
+#### 1.Tidy dataset
+
+The following steps performed to prepare the training dataset for building the model for prediction.  
+
+- Convert blanks ("") and "#DIV/0!" to "NA" 
+- Remove user_name, raw timestamps, windows cnt(7 variables)
+- Remove variables with more than 70% missing value
+- repeat the process on the testing dataset
+
+```{r clean_data, results='hide'}
+#review the training dataset 
+head(pml_training$classe)
+
+#Count training dataset variables for null values
+train_nulls <- sapply(pml_training, function(x) sum(is.na(x)))
+train_nulls
+
+pml_training <- pml_training[,-(1:7)]
+pml_testing <- pml_testing[,-(1:7)]
+
+#prepare the list of variables to be removewd
+#Training Data
+var_train = list()
+for (i in 1:ncol(pml_training)){
+  if ((sum(is.na(pml_training[i]))/nrow(pml_training)) > .70) {
+    var_train = append(var_train, colnames(pml_training[i]))
+  }
+}
+
+#testing data
+var_test = list()
+for (i in 1:ncol(pml_testing)){
+  if ((sum(is.na(pml_testing[i]))/nrow(pml_testing)) > .70) {
+    var_test = append(var_test, colnames(pml_testing[i]))
+  }
+}
+#remove columns with greater than 19000 from the training dataset 
+pml_training = pml_training[,!colnames(pml_training) %in% var_train]
+pml_testing = pml_testing[,!colnames(pml_testing) %in% var_test]
+
+#check dataset for completeness
+sum(complete.cases(pml_training) == TRUE)
+sum(complete.cases(pml_testing) == TRUE)
+```
+After variables with greater than 70% missing value, the training data set retain `r ncol(pml_training)`variables and testing dataset retain `r ncol(pml_testing)` variables
+
+```{r mytrain}
+
+inTrain = createDataPartition(y=pml_training$classe, p=0.70, list=FALSE)
+myTrain = pml_training[inTrain,]; myTest = pml_training[-inTrain,]
+dim(myTrain); dim(myTest)
+```
+70%-30% partition training dataset into training (`r nrow(myTrain)`obs) and testing(`r nrow(myTest)' obs)
+
+#### 2. Modeling and Choosing variables
+```{r Tree_Model}
+set.seed(18688)
+
+modelrpart <- train(classe ~ ., data=myTrain, method='rpart')
+fancyRpartPlot(modelrpart$finalModel)
+
+# Decision Tree package -- more nodes and trees
+modelTree <- rpart(classe ~., data=myTrain, method='class')
+#print(modelTree)
+fancyRpartPlot(modelTree)
+
+#Random Forest Model
+
+modelRF <- randomForest(classe ~., data=myTrain)
+print(modelRF)
+```
+
+```
+#### 3. Cross Validation models 
+
+In applying the best of the two working models - Classification Tree and Random Forest, in predicting in sample error, the confusion matrix returned a higher rate of accuracy for Random Forest predictions.
+
+```{r predict_model, echo=TRUE}
+
+predict_tree = predict(modelTree, newdata=myTest, type='class')
+confusionMatrix(predict_tree, myTest$classe)
+
+predict_RF= predict(modelRF, newdata=myTest, type='class')
+confusionMatrix(predict_RF, myTest$classe)
+```
+#### 4. Random Forest Model for Predition final 
+Random Forest Model choose to be the final model
+
+```{r prediction_testing}
+
+pred_testing = predict(modelRF, pml_testing, type='class')
+print(pred_testing)
+```
+
+#### 5. Submission Function: generate testing case in result files for submission
+
+```{r result_file, eval=TRUE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("./predictions/problem_id_", i, ".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(pred_testing)
+```
+knit('pml_01.Rmd','pml_WriteUp.md' )
